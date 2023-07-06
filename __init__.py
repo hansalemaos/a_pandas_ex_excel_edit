@@ -1,14 +1,14 @@
 import os
+from time import sleep
 from typing import Union
-from pandas.core.frame import DataFrame, Series
 
-from a_stringdf_2_types import convert_stringdf_to_df
-from tempfile import TemporaryDirectory
 import pandas as pd
+from pandas.core.frame import DataFrame, Series
+from tempfile import NamedTemporaryFile
 
 
 def series_to_dataframe(
-    df: Union[pd.Series, pd.DataFrame]
+        df: Union[pd.Series, pd.DataFrame]
 ) -> (Union[pd.Series, pd.DataFrame], bool):
     dataf = df.copy()
     isseries = False
@@ -26,9 +26,14 @@ def series_to_dataframe(
     return dataf, isseries
 
 
-def edit_pandas_with_excel(
-    dframe: Union[pd.Series, pd.DataFrame]
-) -> Union[pd.Series, pd.DataFrame]:
+def get_tmpfile(suffix=".xlsx"):
+    tfp = NamedTemporaryFile(delete=False, suffix=suffix)
+    filename = tfp.name
+    tfp.close()
+    return filename
+
+
+def edit_pandas_with_excel(dframe, sleeptime=3):
     """
     Use this function to quick edit your DataFrame with MS Excel.
     Of course, Pandas is a lot better than Excel, but if you have to change arbitrary values which don't have a clear pattern,
@@ -137,20 +142,34 @@ def edit_pandas_with_excel(
 
     """
     df, isseries = series_to_dataframe(dframe)
-    tmp = TemporaryDirectory()
-    exceltemp = os.path.join(tmp.name, "tmpexcel.xlsx")
-    dfcolumns = df.columns.to_list()
-    df.to_excel(exceltemp)
-    os.system(f"CALL {exceltemp}")
-    dfnew = pd.read_excel(exceltemp)
-    indexcol = [x for x in dfnew.columns if x not in dfcolumns and ": " in x]
-    dfnewoldindex = dfnew[indexcol[0]].__array__().copy()
-    dfnew = dfnew.drop(columns=indexcol[0])
-    dfnew.index = dfnewoldindex.copy()
-    dfnew = convert_stringdf_to_df(dfnew)
+    tmpfile = get_tmpfile(suffix=".xlsx")
+    df.to_excel(tmpfile, index=True, index_label=df.index.to_list(), na_rep='<NA>')
+    os.startfile(tmpfile)
+    sleep(sleeptime)
+    while True:
+        try:
+            os.rename(tmpfile, tmpfile)
+            sleep(sleeptime)
+            break
+        except OSError:
+            sleep(sleeptime)
+            continue
+    try:
+        df2 = pd.read_excel(tmpfile, index_col=0, dtype=df.dtypes.to_dict())
+    except Exception:
+        df2 = pd.read_excel(tmpfile, index_col=0)
+        for key, item in df.dtypes.to_dict().items():
+            try:
+                df2[key] = df2[key].astype(item)
+            except Exception:
+                continue
     if isseries:
-        dfnew = dfnew[dfnew.columns[0]]
-    return dfnew
+        df2 = df2[df2.columns[0]]
+    try:
+        os.remove(tmpfile)
+    except Exception:
+        pass
+    return df2
 
 
 def pd_add_excel_editor():
